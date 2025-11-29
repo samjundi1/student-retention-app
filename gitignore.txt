@@ -1,0 +1,23 @@
+# Backend (Python)
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+backend/artifacts/
+*.joblib
+*.keras
+*.json
+
+# Frontend (Node/React)
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.env
+
+# General
+.DS_Store
+.env
+*.log
