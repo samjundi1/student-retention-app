@@ -6,9 +6,9 @@ __pycache__/
 *.pyd
 *.db
 
-backend/artifacts/
-*.joblib
-*.keras
+#backend/artifacts/
+#*.joblib
+#*.keras
 
 # Frontend (Node/React)
 frontend/node_modules/
