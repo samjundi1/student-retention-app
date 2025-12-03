@@ -17,6 +17,8 @@ class RetentionModelService:
         try:
             # Paths relative to where uvicorn is run (backend/)
             base_path = "artifacts"
+            if not os.path.exists(base_path):
+                 base_path = "backend/artifacts"
             
             print(f"Loading artifacts from {os.path.abspath(base_path)}...")
             
@@ -30,19 +32,18 @@ class RetentionModelService:
             print("Artifacts loaded successfully.")
         except Exception as e:
             print(f"Error loading artifacts: {e}")
-            # We don't raise here to allow the app to start even if models are missing initially
             self.artifacts_loaded = False
 
     def predict(self, input_data: dict):
         if not self.artifacts_loaded:
             self.load_artifacts()
             if not self.artifacts_loaded:
-                raise Exception("Model artifacts could not be loaded. Check 'backend/artifacts' folder.")
+                raise Exception("Model artifacts could not be loaded.")
 
         # 1. Convert to DataFrame
         df = pd.DataFrame([input_data])
 
-        # 2. Feature Engineering (Must match training logic exactly)
+        # 2. Feature Engineering
         df['AvgFirstYearGPA'] = (df['FirstTermGPA'] + df['SecondTermGPA']) / 2
         df['HS_vs_FirstTerm_Gap'] = (df['HighSchoolAverageMark'] / 25) - df['FirstTermGPA']
         df['LowHSMark_flag'] = (df['HighSchoolAverageMark'] < 65).astype(int)
@@ -50,25 +51,42 @@ class RetentionModelService:
         df['FastTrack_isY'] = (df['FastTrack'] == 1).astype(int)
         df['Coop_isY'] = (df['Coop'] == 1).astype(int)
         
-        # Interaction Term
-        df['Intl_English_Risk'] = ((df['Residency'] == 2) & (df['EnglishGrade'] < 5)).astype(int)
-
         # 3. Align Columns
-        df_processed = df[self.feature_names]
+        try:
+            df_processed = df[self.feature_names].copy()
+        except KeyError as e:
+            raise Exception(f"Missing feature columns in input: {e}")
 
-        # 4. Scale
-        X_scaled = self.scaler.transform(df_processed)
+        # 4. Scale ONLY Numeric Columns
+        numeric_cols = [
+            'FirstTermGPA', 'SecondTermGPA', 'HighSchoolAverageMark', 
+            'MathScore', 'AvgFirstYearGPA', 'HS_vs_FirstTerm_Gap'
+        ]
+        
+        # Check for missing values in numeric columns and fill with 0 to prevent NaN output
+        df_processed[numeric_cols] = df_processed[numeric_cols].fillna(0)
+        
+        df_processed[numeric_cols] = self.scaler.transform(df_processed[numeric_cols])
 
         # 5. Predict
-        prediction_prob = self.model.predict(X_scaled)[0][0]
+        # Force all data to float32 to satisfy Keras
+        model_input = df_processed.values.astype(np.float32)
+        prediction_prob = self.model.predict(model_input)[0][0]
         
-        # 6. Threshold Tuning (0.65 as optimized)
-        threshold = 0.65
-        prediction_class = int(prediction_prob > threshold)
+        # --- FIX: Sanitize Output ---
+        # Convert numpy types to python native types and handle NaN/Inf
+        prob = float(prediction_prob)
+        if np.isnan(prob) or np.isinf(prob):
+            print("WARNING: Model predicted NaN/Inf. Defaulting to 0.0")
+            prob = 0.0
+
+        # 6. Threshold Tuning
+        threshold = 0.5
+        prediction_class = int(prob > threshold)
 
         return {
             "prediction": prediction_class,
             "label": "Persist" if prediction_class == 1 else "Dropout Risk",
-            "probability": float(prediction_prob),
-            "risk_score": float(1 - prediction_prob)
+            "probability": prob,
+            "risk_score": 1.0 - prob
         }
